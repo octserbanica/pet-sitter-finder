@@ -7,7 +7,8 @@ import { colors, petLabels, serviceLabels } from '../theme';
 import { PetType, Service } from '../types';
 
 export default function FindScreen({ openSitter }: { openSitter: (id: string) => void }) {
-  const { sitters, favorites, session } = useStore();
+  const { sitters, favorites, session, following } = useStore();
+  const [followingOnly, setFollowingOnly] = useState(false);
   const [query, setQuery] = useState('');
   const [pet, setPet] = useState<PetType | null>(null);
   const [service, setService] = useState<Service | null>(null);
@@ -22,8 +23,9 @@ export default function FindScreen({ openSitter }: { openSitter: (id: string) =>
       .filter((s) => !pet || s.accepts.includes(pet))
       .filter((s) => !service || s.services.includes(service))
       .filter((s) => !availableOnly || s.available)
+      .filter((s) => !followingOnly || (!!s.userId && following.includes(s.userId)))
       .sort((a, b) => (sort === 'rating' ? b.rating - a.rating : a.price - b.price));
-  }, [sitters, query, pet, service, availableOnly, sort]);
+  }, [sitters, query, pet, service, availableOnly, followingOnly, following, sort]);
 
   return (
     <ScrollView contentContainerStyle={{ padding: 16 }} keyboardShouldPersistTaps="handled">
@@ -49,6 +51,7 @@ export default function FindScreen({ openSitter }: { openSitter: (id: string) =>
       </View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
         <Chip label="Available now" selected={availableOnly} onPress={() => setAvailableOnly(!availableOnly)} />
+        <Chip label="Following" selected={followingOnly} onPress={() => setFollowingOnly(!followingOnly)} />
         <Chip label="Top rated" selected={sort === 'rating'} onPress={() => setSort('rating')} />
         <Chip label="Lowest price" selected={sort === 'price'} onPress={() => setSort('price')} />
       </View>

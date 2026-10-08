@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Session } from '@supabase/supabase-js';
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
+import { conversationKey } from './chat';
 import { confirmPayment, startPayment } from './payments';
 import { pickAndUploadPhoto } from './photos';
 import { supabase } from './supabase';
@@ -58,6 +59,13 @@ interface Store {
   bookings: Booking[];
   favorites: string[];
   messages: Message[];
+  following: string[]; // user ids I follow
+  followers: string[]; // user ids following me
+  follow: (userId: string) => Promise<void>;
+  unfollow: (userId: string) => Promise<void>;
+  unread: (ownerId: string, sitterId: string) => number;
+  unreadTotal: number;
+  markChatRead: (ownerId: string, sitterId: string) => void;
   people: Record<string, Profile>; // public profiles of people I have bookings or chats with
   mySitter: Sitter | undefined;
   refresh: () => Promise<void>;
@@ -97,6 +105,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [favorites, setFavorites] = useState<string[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [people, setPeople] = useState<Record<string, Profile>>({});
+  const [following, setFollowing] = useState<string[]>([]);
+  const [followers, setFollowers] = useState<string[]>([]);
+  const [chatReads, setChatReads] = useState<Record<string, number>>({});
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -138,6 +149,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       );
   }, []);
 
+  // Follows and chat read markers. Failures here (e.g. before migration 004) don't block the app.
+  const loadSocial = useCallback(async () => {
+    if (!userId) return;
+    try {
+      const [out, inc, reads] = await Promise.all([
+        supabase.from('follows').select('followee_id').eq('follower_id', userId),
+        supabase.from('follows').select('follower_id').eq('followee_id', userId),
+        supabase.from('chat_reads').select('*'),
+      ]);
+      const outIds = check(out).map((r: any) => r.followee_id as string);
+      const inIds = check(inc).map((r: any) => r.follower_id as string);
+      setFollowing(outIds);
+      setFollowers(inIds);
+      setChatReads(Object.fromEntries(check(reads).map((r: any) => [conversationKey(r.owner_id, r.sitter_id), Date.parse(r.read_at)])));
+      await loadPeople([...outIds, ...inIds]);
+    } catch {
+      // keep whatever we had
+    }
+  }, [userId, loadPeople]);
+
   const refresh = useCallback(async () => {
     if (!userId) return;
     const [p, s, pe, b, f] = await Promise.all([
@@ -156,16 +187,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     confirmPending(bookingRows);
     setFavorites(check(f).map((r: any) => r.sitter_id));
     const msgs = await loadMessages();
+    await loadSocial();
     const sitterOwners = Object.fromEntries(sitterRows.map((x) => [x.id, x.userId]));
     await loadPeople([
       ...bookingRows.map((x) => x.ownerId),
       ...msgs.flatMap((m) => [m.ownerId, sitterOwners[m.sitterId] ?? '']),
     ]);
-  }, [userId, loadMessages, loadPeople, confirmPending]);
+  }, [userId, loadMessages, loadPeople, confirmPending, loadSocial]);
 
   useEffect(() => {
     if (!userId) {
       setProfile(null); setSitters([]); setPets([]); setBookings([]); setFavorites([]); setMessages([]); setPeople({});
+      setFollowing([]); setFollowers([]); setChatReads({});
       return;
     }
     setDataLoading(true);
@@ -199,6 +232,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [userId, confirmPending]);
 
   const mySitter = sitters.find((s) => s.userId === userId);
+
+  // Messages from the other person that arrived after I last opened the conversation.
+  const unread = (ownerId: string, sitterId: string) => {
+    const readAt = chatReads[conversationKey(ownerId, sitterId)] ?? 0;
+    return messages.filter((m) => m.ownerId === ownerId && m.sitterId === sitterId && m.senderId !== userId && m.createdAt > readAt).length;
+  };
+  const unreadTotal = messages.filter((m) => m.senderId !== userId && m.createdAt > (chatReads[conversationKey(m.ownerId, m.sitterId)] ?? 0)).length;
 
   const store: Store = {
     session,
@@ -311,6 +351,30 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         check(await supabase.from('favorites').insert({ sitter_id: sitterId }));
         setFavorites((f) => [...f, sitterId]);
       }
+    },
+    following,
+    followers,
+    follow: async (id) => {
+      check(await supabase.from('follows').insert({ followee_id: id }));
+      setFollowing((f) => [...f, id]);
+      loadPeople([id]).catch(() => {});
+    },
+    unfollow: async (id) => {
+      check(await supabase.from('follows').delete().eq('follower_id', userId).eq('followee_id', id));
+      setFollowing((f) => f.filter((x) => x !== id));
+    },
+    unread,
+    unreadTotal,
+    markChatRead: (ownerId, sitterId) => {
+      // Use the newest message's server time, so a phone with a wrong clock can't hide or resurrect messages.
+      const key = conversationKey(ownerId, sitterId);
+      const latest = messages.filter((m) => m.ownerId === ownerId && m.sitterId === sitterId).at(-1)?.createdAt;
+      if (!latest || (chatReads[key] ?? 0) >= latest) return;
+      setChatReads((r) => ({ ...r, [key]: latest }));
+      supabase
+        .from('chat_reads')
+        .upsert({ user_id: userId, owner_id: ownerId, sitter_id: sitterId, read_at: new Date(latest).toISOString() }, { onConflict: 'user_id,owner_id,sitter_id' })
+        .then(() => {}, () => {});
     },
     sendMessage: async (ownerId, sitterId, body) => {
       const row = check(

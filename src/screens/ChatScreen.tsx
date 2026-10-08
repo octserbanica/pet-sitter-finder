@@ -1,12 +1,14 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { Avatar, ErrorText, styles } from '../components/ui';
 import { describe } from '../chat';
 import { useStore } from '../store';
 import { colors } from '../theme';
 
-export default function ChatScreen({ ownerId, sitterId }: { ownerId: string; sitterId: string }) {
-  const { messages, session, sitters, people, sendMessage } = useStore();
+export default function ChatScreen({ ownerId, sitterId, openPerson }: {
+  ownerId: string; sitterId: string; openPerson: (userId: string) => void;
+}) {
+  const { messages, session, sitters, people, sendMessage, markChatRead } = useStore();
   const me = session!.user.id;
   const other = describe(ownerId, sitterId, me, sitters, people);
   const thread = messages.filter((m) => m.ownerId === ownerId && m.sitterId === sitterId);
@@ -14,6 +16,12 @@ export default function ChatScreen({ ownerId, sitterId }: { ownerId: string; sit
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scroll = useRef<ScrollView>(null);
+  const otherUserId = other.iAmOwner ? sitters.find((s) => s.id === sitterId)?.userId : ownerId;
+
+  // Everything shown on screen counts as read, including messages that arrive while it is open.
+  useEffect(() => {
+    markChatRead(ownerId, sitterId);
+  }, [thread.length]);
 
   const send = async () => {
     if (!text.trim() || busy) return;
@@ -30,13 +38,18 @@ export default function ChatScreen({ ownerId, sitterId }: { ownerId: string; sit
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+      <Pressable
+        onPress={() => otherUserId && openPerson(otherUserId)}
+        disabled={!otherUserId}
+        accessibilityRole="button"
+        style={{ flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}
+      >
         <Avatar url={other.photoUrl} fallback={other.fallback} size={36} />
         <View style={{ marginLeft: 10 }}>
           <Text style={{ fontWeight: '700', color: colors.text }}>{other.name}</Text>
-          <Text style={{ color: colors.muted, fontSize: 12 }}>{other.iAmOwner ? 'Sitter' : 'Pet owner'}</Text>
+          <Text style={{ color: colors.muted, fontSize: 12 }}>{other.iAmOwner ? 'Sitter' : 'Pet owner'}{otherUserId ? ' · View profile' : ''}</Text>
         </View>
-      </View>
+      </Pressable>
       <ScrollView
         ref={scroll}
         contentContainerStyle={{ padding: 12, flexGrow: 1, justifyContent: 'flex-end' }}
