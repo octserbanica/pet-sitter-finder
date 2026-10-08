@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
-import { Avatar, Button, Card, ErrorText, Field, SectionTitle, initials } from '../components/ui';
+import PersonRow from '../components/PersonRow';
+import { Avatar, Button, Card, Chip, ErrorText, Field, SectionTitle, initials } from '../components/ui';
 import { useStore } from '../store';
 import { colors } from '../theme';
 
-export default function ProfileScreen() {
-  const { profile, email, mode, setMode, mySitter, updateProfile, uploadPhoto, becomeSitter, signOut } = useStore();
+export default function ProfileScreen({ openPerson }: { openPerson: (userId: string) => void }) {
+  const { profile, email, mode, setMode, mySitter, updateProfile, uploadPhoto, becomeSitter, signOut, following, followers } = useStore();
+  const [showFollowers, setShowFollowers] = useState(false);
   const [fullName, setFullName] = useState(profile?.fullName ?? '');
   const [age, setAge] = useState(profile?.age ? String(profile.age) : '');
   const [about, setAbout] = useState(profile?.about ?? '');
@@ -93,6 +95,20 @@ export default function ProfileScreen() {
           />
         ) : (
           <Button title="Switch to finding a sitter" variant="secondary" onPress={() => setMode('owner')} />
+        )}
+      </Card>
+
+      <SectionTitle>People</SectionTitle>
+      <Card>
+        <View style={{ flexDirection: 'row', marginBottom: 6 }}>
+          <Chip label={`Following ${following.length}`} selected={!showFollowers} onPress={() => setShowFollowers(false)} />
+          <Chip label={`Followers ${followers.length}`} selected={showFollowers} onPress={() => setShowFollowers(true)} />
+        </View>
+        {(showFollowers ? followers : following).map((id) => <PersonRow key={id} userId={id} onPress={() => openPerson(id)} />)}
+        {(showFollowers ? followers : following).length === 0 && (
+          <Text style={{ color: colors.muted }}>
+            {showFollowers ? 'Nobody follows you yet.' : 'Follow sitters and owners from their profile to keep them here.'}
+          </Text>
         )}
       </Card>
 

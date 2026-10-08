@@ -6,7 +6,7 @@ Accounts and data live in Supabase (Postgres + Auth). The database schema and ac
 ## Connect Supabase (one time)
 
 1. In the Supabase dashboard open **SQL Editor** and run each file in `supabase/migrations/` once, in order
-   (`001_initial.sql`, then `002_profiles_pets_chat.sql`, …). Each new file only needs to be run once.
+   (`001_initial.sql`, then `002_profiles_pets_chat.sql`, `003_payments.sql`, `004_follows_chats.sql`, …). Each new file only needs to be run once.
 2. Open **Project Settings > API**, copy the **anon public** key and put it in `.env` as `EXPO_PUBLIC_SUPABASE_ANON_KEY`.
 3. Email verification: keep **Authentication > Sign In / Providers > Email > Confirm email** turned on.
    In **Authentication > URL Configuration** set the Site URL to the live site and add it (and `https://*--pet-sitter-finder.netlify.app/**`
@@ -46,13 +46,16 @@ npx expo export --platform web   # static web build in dist/
   save favourites, request a booking with a price quote, cancel, and pay by card once the sitter accepts.
 - **Sitter mode**: accept or decline requests (with the owner's profile and their pets' details), see upcoming stays and earnings,
   set services with a price for each, extra-pet charge, pets accepted, city, experience and availability.
-- **Chat**: owners and sitters message each other from a sitter's page, a booking or the Messages tab (refreshes every few seconds).
+- **Chats**: owners and sitters message each other from a sitter's page, a booking or the Chats tab (refreshes every few seconds).
+  The Chats tab shows how many messages are unread, and read status is shared across devices.
+- **Follow**: follow any sitter or owner from their profile; see who you follow and who follows you in Profile, and filter Find to sitters you follow.
 - The six demo sitters have no account: bookings with them are accepted instantly and they can't be messaged.
 
 ## Security rules (enforced in the database, not the app)
 
 - Owners see only their own pets, favourites and bookings; sitters see only requests sent to them and the pets in those requests.
-- Only the two people in a conversation can read or write it.
+- Only the two people in a conversation can read or write it. Each person's read markers are private.
+- Anyone signed in can see who follows whom; you can only follow or unfollow as yourself.
 - Profiles (name, age, photo, about) are visible to signed-in users; only you can edit yours.
 - Sitters can edit only their own listing, and cannot change their rating, reviews or verified badge. Nobody can book themselves.
 - After a booking is made only its status can change: the owner may cancel; the sitter may accept, decline, or cancel an accepted stay.

@@ -8,7 +8,9 @@ import { useStore } from '../store';
 import { colors } from '../theme';
 import { Booking, BookingStatus } from '../types';
 
-export default function SitterRequestsScreen({ openChat }: { openChat: (ownerId: string, sitterId: string) => void }) {
+export default function SitterRequestsScreen({ openChat, openPerson }: {
+  openChat: (ownerId: string, sitterId: string) => void; openPerson: (userId: string) => void;
+}) {
   const { bookings, mySitter, bookedPets, people, setBookingStatus } = useStore();
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -32,6 +34,7 @@ export default function SitterRequestsScreen({ openChat }: { openChat: (ownerId:
             <Button title={expanded === b.id ? 'Hide pets' : 'See pets'} variant="secondary" onPress={() => setExpanded(expanded === b.id ? null : b.id)} />
           )}
           <Button title="Message" variant="secondary" onPress={() => openChat(b.ownerId, b.sitterId)} />
+          <Button title="Profile" variant="secondary" onPress={() => openPerson(b.ownerId)} />
         </View>
         {actions}
       </BookingCard>

@@ -1,12 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
-import { Avatar, Button, Card, Chip, ErrorText, SectionTitle } from '../components/ui';
+import FollowButton from '../components/FollowButton';
+import { Avatar, Button, Card, Chip, SectionTitle } from '../components/ui';
 import { money } from '../format';
 import { useStore } from '../store';
 import { colors, petLabels, serviceLabels, serviceUnit } from '../theme';
 import { Service } from '../types';
 
-export default function SitterProfileScreen({ id, onBook, onMessage }: { id: string; onBook: () => void; onMessage: () => void }) {
+export default function SitterProfileScreen({ id, onBook, onMessage, openPerson }: {
+  id: string; onBook: () => void; onMessage: () => void; openPerson: (userId: string) => void;
+}) {
   const { sitters, favorites, toggleFavorite, people, loadPeople, session } = useStore();
   const [error, setError] = useState<string | null>(null);
   const sitter = sitters.find((s) => s.id === id);
@@ -36,6 +39,12 @@ export default function SitterProfileScreen({ id, onBook, onMessage }: { id: str
           </Text>
           {sitter.verified && (
             <Text style={{ color: colors.green, fontWeight: '700', marginTop: 6 }}>✓ ID and background verified</Text>
+          )}
+          {!!sitter.userId && !isMe && (
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+              <FollowButton userId={sitter.userId} />
+              <Button title="View profile" variant="secondary" onPress={() => openPerson(sitter.userId!)} />
+            </View>
           )}
         </View>
 

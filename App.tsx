@@ -12,6 +12,7 @@ import SitterRequestsScreen from './src/screens/SitterRequestsScreen';
 import AuthScreen from './src/screens/AuthScreen';
 import ChatScreen from './src/screens/ChatScreen';
 import MessagesScreen from './src/screens/MessagesScreen';
+import PersonScreen from './src/screens/PersonScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import { StoreProvider, useStore } from './src/store';
 import { isConfigured } from './src/supabase';
@@ -23,25 +24,26 @@ type Route =
   | { name: 'sitter'; id: string }
   | { name: 'book'; id: string }
   | { name: 'addPet' }
-  | { name: 'chat'; ownerId: string; sitterId: string };
+  | { name: 'chat'; ownerId: string; sitterId: string }
+  | { name: 'person'; userId: string };
 
 const ownerTabs = [
   { key: 'find', label: 'Find', icon: '🔍' },
   { key: 'bookings', label: 'Bookings', icon: '🗓️' },
-  { key: 'messages', label: 'Messages', icon: '💬' },
+  { key: 'messages', label: 'Chats', icon: '💬' },
   { key: 'pets', label: 'My pets', icon: '🐾' },
   { key: 'account', label: 'Profile', icon: '👤' },
 ] as const;
 
 const sitterTabs = [
   { key: 'requests', label: 'Requests', icon: '📬' },
-  { key: 'messages', label: 'Messages', icon: '💬' },
+  { key: 'messages', label: 'Chats', icon: '💬' },
   { key: 'services', label: 'My services', icon: '🪪' },
   { key: 'account', label: 'Profile', icon: '👤' },
 ] as const;
 
 function Main() {
-  const { session, profile, loading, loadError, refresh, signOut, mode: savedMode, setMode, mySitter } = useStore();
+  const { session, profile, loading, loadError, refresh, signOut, mode: savedMode, setMode, mySitter, unreadTotal } = useStore();
   // Sitter mode needs a sitter listing; otherwise the app is in pet-owner mode.
   const mode = savedMode === 'sitter' && mySitter ? 'sitter' : 'owner';
   const [tab, setTab] = useState<string>('find');
@@ -100,6 +102,8 @@ function Main() {
   const route = stack[stack.length - 1];
   const tabs = mode === 'owner' ? ownerTabs : sitterTabs;
   const openChat = (ownerId: string, sitterId: string) => push({ name: 'chat', ownerId, sitterId });
+  const openPerson = (userId: string) => push({ name: 'person', userId });
+  const openSitter = (id: string) => push({ name: 'sitter', id });
 
   let title = tabs.find((t) => t.key === tab)?.label ?? '';
   let body: React.ReactNode;
@@ -110,6 +114,7 @@ function Main() {
         id={route.id}
         onBook={() => push({ name: 'book', id: route.id })}
         onMessage={() => openChat(session.user.id, route.id)}
+        openPerson={openPerson}
       />
     );
   } else if (route?.name === 'book') {
@@ -126,14 +131,17 @@ function Main() {
     body = <PetsScreen startAdding />;
   } else if (route?.name === 'chat') {
     title = 'Chat';
-    body = <ChatScreen ownerId={route.ownerId} sitterId={route.sitterId} />;
-  } else if (tab === 'find') body = <FindScreen openSitter={(id) => push({ name: 'sitter', id })} />;
+    body = <ChatScreen ownerId={route.ownerId} sitterId={route.sitterId} openPerson={openPerson} />;
+  } else if (route?.name === 'person') {
+    title = 'Profile';
+    body = <PersonScreen userId={route.userId} openSitter={openSitter} onMessage={(sitterId) => openChat(session.user.id, sitterId)} />;
+  } else if (tab === 'find') body = <FindScreen openSitter={openSitter} />;
   else if (tab === 'bookings') body = <OwnerBookingsScreen justBooked={justBooked} paidId={paidId} openChat={openChat} />;
   else if (tab === 'messages') body = <MessagesScreen openChat={openChat} />;
   else if (tab === 'pets') body = <PetsScreen />;
-  else if (tab === 'requests') body = <SitterRequestsScreen openChat={openChat} />;
+  else if (tab === 'requests') body = <SitterRequestsScreen openChat={openChat} openPerson={openPerson} />;
   else if (tab === 'services') body = <SitterEditScreen />;
-  else body = <ProfileScreen />;
+  else body = <ProfileScreen openPerson={openPerson} />;
 
   return (
     <View style={{ flex: 1 }}>
@@ -159,7 +167,14 @@ function Main() {
               accessibilityRole="tab"
               accessibilityState={{ selected: tab === t.key }}
             >
-              <Text style={{ fontSize: 20, opacity: tab === t.key ? 1 : 0.5 }}>{t.icon}</Text>
+              <View>
+                <Text style={{ fontSize: 20, opacity: tab === t.key ? 1 : 0.5 }}>{t.icon}</Text>
+                {t.key === 'messages' && unreadTotal > 0 && (
+                  <View style={styles.badge} accessibilityLabel={`${unreadTotal} unread`}>
+                    <Text style={styles.badgeText}>{unreadTotal > 99 ? '99+' : unreadTotal}</Text>
+                  </View>
+                )}
+              </View>
               <Text style={[styles.tabLabel, tab === t.key && { color: colors.primary }]}>{t.label}</Text>
             </Pressable>
           ))}
@@ -195,6 +210,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.bg,
   },
   brand: { fontSize: 20 },
+  badge: {
+    position: 'absolute', top: -4, right: -12, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4,
+    backgroundColor: colors.red, alignItems: 'center', justifyContent: 'center',
+  },
+  badgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
   back: { fontSize: 16, color: colors.primary, fontWeight: '600' },
   title: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '700', color: colors.text },
   tabbar: {
