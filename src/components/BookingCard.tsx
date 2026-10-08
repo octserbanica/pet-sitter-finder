@@ -26,7 +26,10 @@ export default function BookingCard({ booking, title, photoUrl, fallback, childr
         {booking.pets.map((p) => `${petEmoji[p.type]} ${p.name}`).join('   ')}
       </Text>
       {!!booking.note && <Text style={{ color: colors.muted, marginTop: 6, fontStyle: 'italic' }}>“{booking.note}”</Text>}
-      <Text style={{ color: colors.text, fontWeight: '700', marginTop: 8 }}>{money(booking.total)}</Text>
+      <Text style={{ color: colors.text, fontWeight: '700', marginTop: 8 }}>
+        {money(booking.total)}
+        {booking.paidAt ? <Text style={{ color: colors.green }}>{`  ·  ✓ Paid ${fmtDate(new Date(booking.paidAt).toISOString().slice(0, 10))}`}</Text> : null}
+      </Text>
       {children}
     </Card>
   );

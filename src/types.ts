@@ -53,6 +53,8 @@ export interface Booking {
   total: number;
   status: BookingStatus;
   createdAt: number;
+  paidAt: number | null;
+  checkoutStarted: boolean; // a Stripe checkout was opened; may still need confirming
 }
 
 export interface Profile {
