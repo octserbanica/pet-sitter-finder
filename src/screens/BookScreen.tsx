@@ -3,34 +3,36 @@ import { ScrollView, Text, View } from 'react-native';
 import { Button, Card, Chip, Field, SectionTitle, Stepper } from '../components/ui';
 import { addDays, fmtDate, money, todayPlus, unitCount } from '../format';
 import { quote } from '../pricing';
-import { newId, useStore } from '../store';
+import { useStore } from '../store';
 import { colors, petEmoji, serviceLabels } from '../theme';
 import { Service } from '../types';
 
 export default function BookScreen({ id, onDone, onAddPet }: { id: string; onDone: () => void; onAddPet: () => void }) {
-  const { state, dispatch } = useStore();
-  const sitter = state.sitters.find((s) => s.id === id)!;
-  const eligiblePets = state.pets.filter((p) => sitter.accepts.includes(p.type));
+  const { sitters, pets: myPets, createBooking } = useStore();
+  const sitter = sitters.find((s) => s.id === id)!;
+  const eligiblePets = myPets.filter((p) => sitter.accepts.includes(p.type));
   const [selected, setSelected] = useState<string[]>(eligiblePets.slice(0, 1).map((p) => p.id));
   const [service, setService] = useState<Service>(sitter.services[0]);
   const [startOffset, setStartOffset] = useState(7);
   const [units, setUnits] = useState(3);
   const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const start = todayPlus(startOffset);
   const { perUnit, total } = quote(sitter, service, units, selected.length);
   const isNights = service === 'boarding' || service === 'house';
 
-  const submit = () => {
-    const pets = state.pets.filter((p) => selected.includes(p.id)).map((p) => ({ name: p.name, type: p.type }));
-    dispatch({
-      type: 'addBooking',
-      booking: {
-        id: newId(), sitterId: id, ownerName: state.ownerName, pets, service, start,
-        nights: units, note, total, status: 'pending', createdAt: Date.now(),
-      },
-    });
-    onDone();
+  const submit = async () => {
+    const pets = myPets.filter((p) => selected.includes(p.id)).map((p) => ({ name: p.name, type: p.type }));
+    setBusy(true); setError(null);
+    try {
+      await createBooking({ sitterId: id, pets, service, start, nights: units, note, total });
+      onDone();
+    } catch (e: any) {
+      setError(e.message);
+      setBusy(false);
+    }
   };
 
   return (
@@ -87,7 +89,8 @@ export default function BookScreen({ id, onDone, onAddPet }: { id: string; onDon
         <Text style={{ color: colors.muted, fontSize: 12, marginTop: 6 }}>You will only be charged once the sitter accepts.</Text>
       </Card>
 
-      <Button title="Send request" onPress={submit} disabled={selected.length === 0} />
+      {error && <Text style={{ color: colors.red, marginBottom: 10 }}>{error}</Text>}
+      <Button title={busy ? 'Sending…' : 'Send request'} onPress={submit} disabled={selected.length === 0 || busy} />
     </ScrollView>
   );
 }

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { Button, Card, Chip, SectionTitle } from '../components/ui';
 import { money } from '../format';
@@ -6,10 +6,11 @@ import { useStore } from '../store';
 import { colors, petLabels, serviceLabels, serviceUnit } from '../theme';
 
 export default function SitterProfileScreen({ id, onBook }: { id: string; onBook: () => void }) {
-  const { state, dispatch } = useStore();
-  const sitter = state.sitters.find((s) => s.id === id);
+  const { sitters, favorites, toggleFavorite } = useStore();
+  const [error, setError] = useState<string | null>(null);
+  const sitter = sitters.find((s) => s.id === id);
   if (!sitter) return null;
-  const fav = state.favorites.includes(id);
+  const fav = favorites.includes(id);
 
   return (
     <View style={{ flex: 1 }}>
@@ -52,11 +53,12 @@ export default function SitterProfileScreen({ id, onBook }: { id: string; onBook
         ))}
       </ScrollView>
 
+      {error && <Text style={{ position: 'absolute', bottom: 76, left: 12, right: 12, color: colors.red }}>{error}</Text>}
       <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: 12, flexDirection: 'row', backgroundColor: colors.bg, borderTopWidth: 1, borderTopColor: colors.border }}>
         <Button
           title={fav ? '❤️ Saved' : '🤍 Save'}
           variant="secondary"
-          onPress={() => dispatch({ type: 'toggleFavorite', id })}
+          onPress={() => toggleFavorite(id).then(() => setError(null), (e) => setError(e.message))}
           style={{ marginRight: 10 }}
         />
         <Button

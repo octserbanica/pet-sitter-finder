@@ -7,7 +7,7 @@ import { colors, petLabels, serviceLabels } from '../theme';
 import { PetType, Service } from '../types';
 
 export default function FindScreen({ openSitter }: { openSitter: (id: string) => void }) {
-  const { state } = useStore();
+  const { sitters, favorites } = useStore();
   const [query, setQuery] = useState('');
   const [pet, setPet] = useState<PetType | null>(null);
   const [service, setService] = useState<Service | null>(null);
@@ -16,13 +16,13 @@ export default function FindScreen({ openSitter }: { openSitter: (id: string) =>
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return state.sitters
+    return sitters
       .filter((s) => !q || `${s.name} ${s.city} ${s.neighborhood}`.toLowerCase().includes(q))
       .filter((s) => !pet || s.accepts.includes(pet))
       .filter((s) => !service || s.services.includes(service))
       .filter((s) => !availableOnly || s.available)
       .sort((a, b) => (sort === 'rating' ? b.rating - a.rating : a.price - b.price));
-  }, [state.sitters, query, pet, service, availableOnly, sort]);
+  }, [sitters, query, pet, service, availableOnly, sort]);
 
   return (
     <ScrollView contentContainerStyle={{ padding: 16 }} keyboardShouldPersistTaps="handled">
@@ -54,7 +54,7 @@ export default function FindScreen({ openSitter }: { openSitter: (id: string) =>
 
       <Text style={[styles.section, { marginTop: 8 }]}>{results.length} sitter{results.length === 1 ? '' : 's'} found</Text>
       {results.map((s) => (
-        <SitterCard key={s.id} sitter={s} favorite={state.favorites.includes(s.id)} onPress={() => openSitter(s.id)} />
+        <SitterCard key={s.id} sitter={s} favorite={favorites.includes(s.id)} onPress={() => openSitter(s.id)} />
       ))}
       {results.length === 0 && <Empty emoji="🔎" text="No sitters match these filters. Try removing one." />}
     </ScrollView>

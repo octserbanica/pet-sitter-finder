@@ -2,7 +2,6 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { ME_SITTER_ID } from './src/data';
 import AccountScreen from './src/screens/AccountScreen';
 import BookScreen from './src/screens/BookScreen';
 import FindScreen from './src/screens/FindScreen';
@@ -11,9 +10,11 @@ import PetsScreen from './src/screens/PetsScreen';
 import SitterEditScreen from './src/screens/SitterEditScreen';
 import SitterProfileScreen from './src/screens/SitterProfileScreen';
 import SitterRequestsScreen from './src/screens/SitterRequestsScreen';
-import WelcomeScreen from './src/screens/WelcomeScreen';
+import AuthScreen from './src/screens/AuthScreen';
 import { StoreProvider, useStore } from './src/store';
+import { isConfigured } from './src/supabase';
 import { colors } from './src/theme';
+import { Button } from './src/components/ui';
 
 type Route = { name: 'sitter'; id: string } | { name: 'book'; id: string } | { name: 'addPet' };
 
@@ -31,7 +32,8 @@ const sitterTabs = [
 ] as const;
 
 function Main() {
-  const { state, dispatch, ready } = useStore();
+  const { session, profile, loading, loadError, refresh, signOut } = useStore();
+  const role = profile?.role ?? null;
   const [tab, setTab] = useState<string>('find');
   const [stack, setStack] = useState<Route[]>([]);
   const [justBooked, setJustBooked] = useState(false);
@@ -39,11 +41,12 @@ function Main() {
   const push = (r: Route) => setStack((s) => [...s, r]);
   const pop = () => setStack((s) => s.slice(0, -1));
 
-  // Reset navigation when the role changes.
+  // Reset navigation when a different account signs in.
   useEffect(() => {
     setStack([]);
-    setTab(state.role === 'sitter' ? 'requests' : 'find');
-  }, [state.role]);
+    setTab(role === 'sitter' ? 'requests' : 'find');
+    setJustBooked(false);
+  }, [profile?.id, role]);
 
   // Android hardware back button.
   useEffect(() => {
@@ -54,22 +57,29 @@ function Main() {
     return () => sub.remove();
   }, [stack.length]);
 
-  // Simulated sitters reply a few seconds after a request. The demo sitter
-  // account (ME_SITTER_ID) is answered by hand in sitter mode instead.
-  useEffect(() => {
-    const timers = state.bookings
-      .filter((b) => b.status === 'pending' && b.sitterId !== ME_SITTER_ID)
-      .map((b) => setTimeout(() => dispatch({ type: 'setBookingStatus', id: b.id, status: 'accepted' }), 4000));
-    return () => timers.forEach(clearTimeout);
-  }, [state.bookings]);
-
-  if (!ready) {
+  if (!isConfigured) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.message}>The app is not connected to Supabase yet. Add EXPO_PUBLIC_SUPABASE_ANON_KEY to the .env file and restart.</Text>
+      </View>
+    );
+  }
+  if (loading) {
     return <View style={styles.center}><ActivityIndicator color={colors.primary} /></View>;
   }
-  if (!state.role) return <WelcomeScreen />;
+  if (!session) return <AuthScreen />;
+  if (loadError || !profile) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.message}>Could not load your account: {loadError ?? 'profile missing'}</Text>
+        <Button title="Try again" onPress={() => refresh()} style={{ marginBottom: 10, alignSelf: 'stretch' }} />
+        <Button title="Sign out" variant="secondary" onPress={signOut} style={{ alignSelf: 'stretch' }} />
+      </View>
+    );
+  }
 
   const route = stack[stack.length - 1];
-  const tabs = state.role === 'owner' ? ownerTabs : sitterTabs;
+  const tabs = role === 'owner' ? ownerTabs : sitterTabs;
 
   let title = tabs.find((t) => t.key === tab)?.label ?? '';
   let body: React.ReactNode;
@@ -115,7 +125,7 @@ function Main() {
             <Pressable
               key={t.key}
               style={styles.tab}
-              onPress={() => { setTab(t.key); setJustBooked(false); }}
+              onPress={() => { setTab(t.key); setJustBooked(false); refresh().catch(() => {}); }}
               accessibilityRole="tab"
               accessibilityState={{ selected: tab === t.key }}
             >
@@ -148,7 +158,8 @@ export default function App() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   frame: { flex: 1, width: '100%', maxWidth: 720, alignSelf: 'center' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  message: { color: colors.text, textAlign: 'center', marginBottom: 16, fontSize: 15 },
   header: {
     flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12,
     borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.bg,

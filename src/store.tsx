@@ -1,90 +1,168 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, { createContext, useContext, useEffect, useReducer } from 'react';
-import { initialBookings, initialPets, sitters as initialSitters } from './data';
-import { Booking, BookingStatus, Pet, Role, Sitter } from './types';
+import type { Session } from '@supabase/supabase-js';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { supabase } from './supabase';
+import { Booking, BookingStatus, Pet, Profile, Service, Sitter } from './types';
 
-interface State {
-  role: Role | null;
-  ownerName: string;
+// Database rows use snake_case; the app uses camelCase.
+const toSitter = (r: any): Sitter => ({
+  id: r.id, userId: r.user_id, name: r.name, avatar: r.avatar, city: r.city, neighborhood: r.neighborhood,
+  rating: Number(r.rating), reviews: r.reviews, price: r.price, years: r.years, verified: r.verified,
+  available: r.available, services: r.services, accepts: r.accepts, bio: r.bio, reviewList: r.review_list ?? [],
+});
+const toPet = (r: any): Pet => ({ id: r.id, name: r.name, type: r.type, breed: r.breed, age: r.age, notes: r.notes });
+const toBooking = (r: any): Booking => ({
+  id: r.id, ownerId: r.owner_id, sitterId: r.sitter_id, ownerName: r.owner_name, pets: r.pets, service: r.service,
+  start: String(r.start).slice(0, 10), nights: r.nights, note: r.note, total: r.total, status: r.status, createdAt: Date.parse(r.created_at),
+});
+
+export interface NewBooking {
+  sitterId: string;
+  pets: { name: string; type: Pet['type'] }[];
+  service: Service;
+  start: string;
+  nights: number;
+  note: string;
+  total: number; // shown to the user; the database recalculates it
+}
+
+interface Store {
+  session: Session | null;
+  profile: Profile | null;
+  loading: boolean;
+  loadError: string | null;
+  sitters: Sitter[];
   pets: Pet[];
   bookings: Booking[];
-  sitters: Sitter[];
   favorites: string[];
+  mySitter: Sitter | undefined;
+  refresh: () => Promise<void>;
+  addPet: (pet: Omit<Pet, 'id'>) => Promise<void>;
+  removePet: (id: string) => Promise<void>;
+  createBooking: (b: NewBooking) => Promise<void>;
+  setBookingStatus: (id: string, status: BookingStatus) => Promise<void>;
+  updateMySitter: (s: Sitter) => Promise<void>;
+  toggleFavorite: (sitterId: string) => Promise<void>;
+  signOut: () => Promise<void>;
 }
 
-type Action =
-  | { type: 'hydrate'; state: State }
-  | { type: 'setRole'; role: Role | null }
-  | { type: 'addPet'; pet: Pet }
-  | { type: 'removePet'; id: string }
-  | { type: 'addBooking'; booking: Booking }
-  | { type: 'setBookingStatus'; id: string; status: BookingStatus }
-  | { type: 'updateSitter'; sitter: Sitter }
-  | { type: 'toggleFavorite'; id: string }
-  | { type: 'reset' };
+const StoreContext = createContext<Store | null>(null);
 
-const initialState: State = {
-  role: null,
-  ownerName: 'Octavian',
-  pets: initialPets,
-  bookings: initialBookings,
-  sitters: initialSitters,
-  favorites: [],
+const check = <T,>({ data, error }: { data: T; error: { message: string } | null }) => {
+  if (error) throw new Error(error.message);
+  return data as NonNullable<T>;
 };
 
-function reducer(state: State, action: Action): State {
-  switch (action.type) {
-    case 'hydrate':
-      return action.state;
-    case 'setRole':
-      return { ...state, role: action.role };
-    case 'addPet':
-      return { ...state, pets: [...state.pets, action.pet] };
-    case 'removePet':
-      return { ...state, pets: state.pets.filter((p) => p.id !== action.id) };
-    case 'addBooking':
-      return { ...state, bookings: [action.booking, ...state.bookings] };
-    case 'setBookingStatus':
-      return {
-        ...state,
-        bookings: state.bookings.map((b) => (b.id === action.id ? { ...b, status: action.status } : b)),
-      };
-    case 'updateSitter':
-      return { ...state, sitters: state.sitters.map((s) => (s.id === action.sitter.id ? action.sitter : s)) };
-    case 'toggleFavorite':
-      return {
-        ...state,
-        favorites: state.favorites.includes(action.id)
-          ? state.favorites.filter((f) => f !== action.id)
-          : [...state.favorites, action.id],
-      };
-    case 'reset':
-      return initialState;
-  }
-}
-
-const STORAGE_KEY = 'pet-sitter-finder/v1';
-
-const StoreContext = createContext<{ state: State; dispatch: React.Dispatch<Action>; ready: boolean } | null>(null);
-
 export function StoreProvider({ children }: { children: React.ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, initialState);
-  const [ready, setReady] = React.useState(false);
+  const [session, setSession] = useState<Session | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [dataLoading, setDataLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [sitters, setSitters] = useState<Sitter[]>([]);
+  const [pets, setPets] = useState<Pet[]>([]);
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [favorites, setFavorites] = useState<string[]>([]);
 
   useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEY)
-      .then((raw) => {
-        if (raw) dispatch({ type: 'hydrate', state: { ...initialState, ...JSON.parse(raw) } });
-      })
-      .catch(() => {})
-      .finally(() => setReady(true));
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setAuthReady(true);
+    });
+    const { data } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
+    return () => data.subscription.unsubscribe();
   }, []);
 
-  useEffect(() => {
-    if (ready) AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state)).catch(() => {});
-  }, [state, ready]);
+  const userId = session?.user.id;
 
-  return <StoreContext.Provider value={{ state, dispatch, ready }}>{children}</StoreContext.Provider>;
+  const refresh = useCallback(async () => {
+    if (!userId) return;
+    const [p, s, pe, b, f] = await Promise.all([
+      supabase.from('profiles').select('*').eq('id', userId).single(),
+      supabase.from('sitters').select('*'),
+      supabase.from('pets').select('*').order('created_at'),
+      supabase.from('bookings').select('*').order('created_at', { ascending: false }),
+      supabase.from('favorites').select('sitter_id'),
+    ]);
+    const pr: any = check(p);
+    setProfile({ id: pr.id, email: session?.user.email ?? '', fullName: pr.full_name, role: pr.role });
+    setSitters(check(s).map(toSitter));
+    setPets(check(pe).map(toPet));
+    setBookings(check(b).map(toBooking));
+    setFavorites(check(f).map((r: any) => r.sitter_id));
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) {
+      setProfile(null); setSitters([]); setPets([]); setBookings([]); setFavorites([]);
+      return;
+    }
+    setDataLoading(true);
+    setLoadError(null);
+    refresh().catch((e) => setLoadError(e.message)).finally(() => setDataLoading(false));
+  }, [userId, refresh]);
+
+  const store: Store = {
+    session,
+    profile,
+    loading: !authReady || dataLoading || (!!userId && !profile && !loadError),
+    loadError,
+    sitters,
+    pets,
+    bookings,
+    favorites,
+    mySitter: sitters.find((s) => s.userId === userId),
+    refresh,
+    addPet: async (pet) => {
+      const row = check(await supabase.from('pets').insert(pet).select().single());
+      setPets((list) => [...list, toPet(row)]);
+    },
+    removePet: async (id) => {
+      check(await supabase.from('pets').delete().eq('id', id));
+      setPets((list) => list.filter((p) => p.id !== id));
+    },
+    createBooking: async (b) => {
+      const row = check(
+        await supabase
+          .from('bookings')
+          .insert({ sitter_id: b.sitterId, pets: b.pets, service: b.service, start: b.start, nights: b.nights, note: b.note, total: b.total })
+          .select()
+          .single(),
+      );
+      setBookings((list) => [toBooking(row), ...list]);
+    },
+    setBookingStatus: async (id, status) => {
+      const row = check(await supabase.from('bookings').update({ status }).eq('id', id).select().single());
+      setBookings((list) => list.map((x) => (x.id === id ? toBooking(row) : x)));
+    },
+    updateMySitter: async (s) => {
+      const row = check(
+        await supabase
+          .from('sitters')
+          .update({
+            name: s.name, city: s.city, neighborhood: s.neighborhood, price: s.price, available: s.available,
+            services: s.services, accepts: s.accepts, bio: s.bio, avatar: s.avatar,
+          })
+          .eq('id', s.id)
+          .select()
+          .single(),
+      );
+      setSitters((list) => list.map((x) => (x.id === s.id ? toSitter(row) : x)));
+    },
+    toggleFavorite: async (sitterId) => {
+      if (favorites.includes(sitterId)) {
+        check(await supabase.from('favorites').delete().eq('sitter_id', sitterId));
+        setFavorites((f) => f.filter((x) => x !== sitterId));
+      } else {
+        check(await supabase.from('favorites').insert({ sitter_id: sitterId }));
+        setFavorites((f) => [...f, sitterId]);
+      }
+    },
+    signOut: async () => {
+      await supabase.auth.signOut();
+    },
+  };
+
+  return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
 }
 
 export function useStore() {
@@ -92,5 +170,3 @@ export function useStore() {
   if (!ctx) throw new Error('useStore must be used inside StoreProvider');
   return ctx;
 }
-
-export const newId = () => Math.random().toString(36).slice(2, 10);

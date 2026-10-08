@@ -1,34 +1,27 @@
 import React from 'react';
 import { ScrollView, Text } from 'react-native';
 import { Button, Card, SectionTitle } from '../components/ui';
-import { ME_SITTER_ID } from '../data';
 import { useStore } from '../store';
 import { colors } from '../theme';
 
 export default function AccountScreen() {
-  const { state, dispatch } = useStore();
-  const me = state.sitters.find((s) => s.id === ME_SITTER_ID)!;
-  const isOwner = state.role === 'owner';
+  const { profile, signOut } = useStore();
+  if (!profile) return null;
   return (
     <ScrollView contentContainerStyle={{ padding: 16 }}>
       <Card>
         <Text style={{ fontSize: 13, color: colors.muted }}>Signed in as</Text>
-        <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text, marginTop: 4 }}>
-          {isOwner ? `${state.ownerName} (pet owner)` : `${me.name} (sitter)`}
+        <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text, marginTop: 4 }}>{profile.fullName || profile.email}</Text>
+        <Text style={{ color: colors.muted, marginTop: 2 }}>{profile.email}</Text>
+        <Text style={{ color: colors.text, marginTop: 8 }}>
+          {profile.role === 'owner' ? '🏠 Pet owner account' : '🤝 Pet sitter account'}
         </Text>
       </Card>
 
-      <SectionTitle>Demo</SectionTitle>
-      <Button
-        title={isOwner ? 'Switch to sitter mode' : 'Switch to pet owner mode'}
-        variant="secondary"
-        onPress={() => dispatch({ type: 'setRole', role: isOwner ? 'sitter' : 'owner' })}
-        style={{ marginBottom: 10 }}
-      />
-      <Button title="Back to welcome screen" variant="secondary" onPress={() => dispatch({ type: 'setRole', role: null })} style={{ marginBottom: 10 }} />
-      <Button title="Reset sample data" variant="danger" onPress={() => dispatch({ type: 'reset' })} />
+      <SectionTitle>Account</SectionTitle>
+      <Button title="Sign out" variant="secondary" onPress={signOut} />
       <Text style={{ color: colors.muted, fontSize: 12, marginTop: 14 }}>
-        This prototype has no server yet. Accounts, payments and messaging are simulated, and data is stored only on this device.
+        Prototype: payments and messaging are not built yet. The six sitters with reviews are demo listings and accept bookings instantly.
       </Text>
     </ScrollView>
   );

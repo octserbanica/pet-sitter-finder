@@ -5,6 +5,7 @@ export type BookingStatus = 'pending' | 'accepted' | 'declined' | 'cancelled';
 
 export interface Sitter {
   id: string;
+  userId: string | null; // null for demo sitters without an account
   name: string;
   avatar: string;
   city: string;
@@ -32,6 +33,7 @@ export interface Pet {
 
 export interface Booking {
   id: string;
+  ownerId: string;
   sitterId: string;
   ownerName: string;
   pets: { name: string; type: PetType }[];
@@ -42,4 +44,11 @@ export interface Booking {
   total: number;
   status: BookingStatus;
   createdAt: number;
+}
+
+export interface Profile {
+  id: string;
+  email: string;
+  fullName: string;
+  role: Role;
 }

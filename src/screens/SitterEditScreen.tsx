@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { Button, Card, Chip, Field, SectionTitle, Stepper } from '../components/ui';
-import { ME_SITTER_ID } from '../data';
 import { money } from '../format';
 import { useStore } from '../store';
 import { colors, petLabels, serviceLabels } from '../theme';
@@ -10,11 +9,25 @@ import { PetType, Service } from '../types';
 const toggle = <T,>(list: T[], item: T) => (list.includes(item) ? list.filter((x) => x !== item) : [...list, item]);
 
 export default function SitterEditScreen() {
-  const { state, dispatch } = useStore();
-  const me = state.sitters.find((s) => s.id === ME_SITTER_ID)!;
-  const [draft, setDraft] = useState(me);
+  const { mySitter, updateMySitter } = useStore();
+  const [draft, setDraft] = useState(mySitter);
   const [saved, setSaved] = useState(false);
-  const set = (patch: Partial<typeof me>) => { setDraft({ ...draft, ...patch }); setSaved(false); };
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!draft) return null;
+  const set = (patch: Partial<typeof draft>) => { setDraft({ ...draft, ...patch }); setSaved(false); };
+  const save = async () => {
+    setBusy(true); setError(null);
+    try {
+      await updateMySitter(draft);
+      setSaved(true);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const ready = draft.services.length > 0 && draft.accepts.length > 0 && draft.name.trim() && draft.city.trim();
 
   return (
     <ScrollView contentContainerStyle={{ padding: 16 }} keyboardShouldPersistTaps="handled">
@@ -23,10 +36,15 @@ export default function SitterEditScreen() {
           <Text style={{ fontSize: 40, marginRight: 12 }}>{draft.avatar}</Text>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 18, fontWeight: '800', color: colors.text }}>{draft.name}</Text>
-            <Text style={{ color: colors.muted }}>⭐ {draft.rating} · {draft.reviews} reviews</Text>
+            <Text style={{ color: colors.muted }}>{draft.reviews ? `⭐ ${draft.rating} · ${draft.reviews} reviews` : 'No reviews yet'}</Text>
           </View>
         </View>
       </Card>
+
+      <SectionTitle>Where you are</SectionTitle>
+      <Field label="Name shown to owners" value={draft.name} onChangeText={(name) => set({ name })} />
+      <Field label="City" value={draft.city} onChangeText={(city) => set({ city })} placeholder="e.g. Bucharest" />
+      <Field label="Neighbourhood" value={draft.neighborhood} onChangeText={(neighborhood) => set({ neighborhood })} placeholder="e.g. Floreasca" />
 
       <SectionTitle>Availability</SectionTitle>
       <View style={{ flexDirection: 'row' }}>
@@ -59,11 +77,9 @@ export default function SitterEditScreen() {
       <SectionTitle>About me</SectionTitle>
       <Field label="Shown on your public profile" value={draft.bio} onChangeText={(bio) => set({ bio })} multiline />
 
-      <Button
-        title={saved ? '✓ Saved' : 'Save profile'}
-        disabled={draft.services.length === 0 || draft.accepts.length === 0}
-        onPress={() => { dispatch({ type: 'updateSitter', sitter: draft }); setSaved(true); }}
-      />
+      {error && <Text style={{ color: colors.red, marginBottom: 10 }}>{error}</Text>}
+      {!ready && <Text style={{ color: colors.muted, marginBottom: 10 }}>Add your name, city, at least one service and one pet type to save.</Text>}
+      <Button title={busy ? 'Saving…' : saved ? '✓ Saved' : 'Save profile'} disabled={!ready || busy} onPress={save} />
     </ScrollView>
   );
 }
