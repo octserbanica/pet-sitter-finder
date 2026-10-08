@@ -15,6 +15,7 @@ import MessagesScreen from './src/screens/MessagesScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import { StoreProvider, useStore } from './src/store';
 import { isConfigured } from './src/supabase';
+import { clearStripeReturn, stripeReturn } from './src/payments';
 import { colors } from './src/theme';
 import { Button } from './src/components/ui';
 
@@ -40,12 +41,15 @@ const sitterTabs = [
 ] as const;
 
 function Main() {
-  const { session, profile, loading, loadError, refresh, signOut, mode: savedMode, mySitter } = useStore();
+  const { session, profile, loading, loadError, refresh, signOut, mode: savedMode, setMode, mySitter } = useStore();
   // Sitter mode needs a sitter listing; otherwise the app is in pet-owner mode.
   const mode = savedMode === 'sitter' && mySitter ? 'sitter' : 'owner';
   const [tab, setTab] = useState<string>('find');
   const [stack, setStack] = useState<Route[]>([]);
   const [justBooked, setJustBooked] = useState(false);
+  // Web: set when Stripe sends the user back to the app.
+  const [paidId, setPaidId] = useState<string | null>(stripeReturn?.paid ? stripeReturn.bookingId : null);
+  const [fromStripe, setFromStripe] = useState(!!stripeReturn);
 
   const push = (r: Route) => setStack((s) => [...s, r]);
   const pop = () => setStack((s) => s.slice(0, -1));
@@ -53,7 +57,13 @@ function Main() {
   // Reset navigation when someone signs in or switches between owner and sitter mode.
   useEffect(() => {
     setStack([]);
-    setTab(mode === 'sitter' ? 'requests' : profile && !profile.fullName ? 'account' : 'find');
+    if (fromStripe && profile) {
+      // Back from Stripe: show the owner's bookings (switching out of sitter mode re-runs this).
+      if (mode === 'sitter') return setMode('owner');
+      clearStripeReturn();
+      setFromStripe(false);
+      setTab('bookings');
+    } else setTab(mode === 'sitter' ? 'requests' : profile && !profile.fullName ? 'account' : 'find');
     setJustBooked(false);
   }, [profile?.id, mode]);
 
@@ -118,7 +128,7 @@ function Main() {
     title = 'Chat';
     body = <ChatScreen ownerId={route.ownerId} sitterId={route.sitterId} />;
   } else if (tab === 'find') body = <FindScreen openSitter={(id) => push({ name: 'sitter', id })} />;
-  else if (tab === 'bookings') body = <OwnerBookingsScreen justBooked={justBooked} openChat={openChat} />;
+  else if (tab === 'bookings') body = <OwnerBookingsScreen justBooked={justBooked} paidId={paidId} openChat={openChat} />;
   else if (tab === 'messages') body = <MessagesScreen openChat={openChat} />;
   else if (tab === 'pets') body = <PetsScreen />;
   else if (tab === 'requests') body = <SitterRequestsScreen openChat={openChat} />;
@@ -145,7 +155,7 @@ function Main() {
             <Pressable
               key={t.key}
               style={styles.tab}
-              onPress={() => { setTab(t.key); setJustBooked(false); refresh().catch(() => {}); }}
+              onPress={() => { setTab(t.key); setJustBooked(false); setPaidId(null); refresh().catch(() => {}); }}
               accessibilityRole="tab"
               accessibilityState={{ selected: tab === t.key }}
             >

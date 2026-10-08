@@ -1,6 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Session } from '@supabase/supabase-js';
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { AppState, Platform } from 'react-native';
+import { confirmPayment, startPayment } from './payments';
 import { pickAndUploadPhoto } from './photos';
 import { supabase } from './supabase';
 import { Booking, BookingStatus, Message, Mode, Pet, Profile, Service, Sitter } from './types';
@@ -19,7 +21,8 @@ const toPet = (r: any): Pet => ({
 const toBooking = (r: any): Booking => ({
   id: r.id, ownerId: r.owner_id, sitterId: r.sitter_id, ownerName: r.owner_name, pets: r.pets, petIds: r.pet_ids ?? [],
   service: r.service, start: String(r.start).slice(0, 10), nights: r.nights, note: r.note, total: r.total,
-  status: r.status, createdAt: Date.parse(r.created_at),
+  status: r.status, createdAt: Date.parse(r.created_at), paidAt: r.paid_at ? Date.parse(r.paid_at) : null,
+  checkoutStarted: !!r.stripe_session_id,
 });
 const toProfile = (r: any): Profile => ({
   id: r.id, fullName: r.full_name, age: r.age, about: r.about ?? '', avatarUrl: r.avatar_url,
@@ -65,6 +68,7 @@ interface Store {
   removePet: (id: string) => Promise<void>;
   createBooking: (b: NewBooking) => Promise<void>;
   setBookingStatus: (id: string, status: BookingStatus) => Promise<void>;
+  payBooking: (id: string) => Promise<void>;
   becomeSitter: () => Promise<void>;
   updateMySitter: (s: SitterInput) => Promise<void>;
   toggleFavorite: (sitterId: string) => Promise<void>;
@@ -119,6 +123,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return rows;
   }, []);
 
+  // After someone opens Stripe checkout, ask the server whether the payment went through.
+  const confirmPending = useCallback((rows: Booking[]) => {
+    rows
+      .filter((b) => b.status === 'accepted' && b.checkoutStarted && !b.paidAt)
+      .forEach((b) =>
+        confirmPayment(b.id)
+          .then(async ({ paid }) => {
+            if (!paid) return;
+            const row = check(await supabase.from('bookings').select('*').eq('id', b.id).single());
+            setBookings((list) => list.map((x) => (x.id === b.id ? toBooking(row) : x)));
+          })
+          .catch(() => {}),
+      );
+  }, []);
+
   const refresh = useCallback(async () => {
     if (!userId) return;
     const [p, s, pe, b, f] = await Promise.all([
@@ -134,6 +153,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setSitters(sitterRows);
     setPets(check(pe).map(toPet));
     setBookings(bookingRows);
+    confirmPending(bookingRows);
     setFavorites(check(f).map((r: any) => r.sitter_id));
     const msgs = await loadMessages();
     const sitterOwners = Object.fromEntries(sitterRows.map((x) => [x.id, x.userId]));
@@ -141,7 +161,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       ...bookingRows.map((x) => x.ownerId),
       ...msgs.flatMap((m) => [m.ownerId, sitterOwners[m.sitterId] ?? '']),
     ]);
-  }, [userId, loadMessages, loadPeople]);
+  }, [userId, loadMessages, loadPeople, confirmPending]);
 
   useEffect(() => {
     if (!userId) {
@@ -166,6 +186,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }, 5000);
     return () => clearInterval(timer);
   }, [userId, loadMessages, loadPeople, people]);
+
+  // Mobile: when coming back from the Stripe page in the browser, check for the payment.
+  const bookingsRef = useRef(bookings);
+  bookingsRef.current = bookings;
+  useEffect(() => {
+    if (!userId || Platform.OS === 'web') return;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') confirmPending(bookingsRef.current);
+    });
+    return () => sub.remove();
+  }, [userId, confirmPending]);
 
   const mySitter = sitters.find((s) => s.userId === userId);
 
@@ -241,6 +272,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setBookingStatus: async (id, status) => {
       const row = check(await supabase.from('bookings').update({ status }).eq('id', id).select().single());
       setBookings((list) => list.map((x) => (x.id === id ? toBooking(row) : x)));
+    },
+    payBooking: async (id) => {
+      await startPayment(id);
+      // On web the page navigates away; on mobile, remember a checkout is open so returning confirms it.
+      setBookings((list) => list.map((x) => (x.id === id ? { ...x, checkoutStarted: true } : x)));
     },
     becomeSitter: async () => {
       // The database fills in the name and photo from the profile.
