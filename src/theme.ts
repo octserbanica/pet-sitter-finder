@@ -1,4 +1,4 @@
-import { PetType, Service } from './types';
+import { PetSize, PetType, Service } from './types';
 
 export const colors = {
   bg: '#F7F5F2',
@@ -38,3 +38,12 @@ export const serviceUnit: Record<Service, string> = {
   dropin: 'visit',
   walking: 'walk',
 };
+
+export const sizeLabels: Record<PetSize, string> = {
+  small: 'Small (under 10 kg)',
+  medium: 'Medium (10–25 kg)',
+  large: 'Large (25–45 kg)',
+  giant: 'Giant (over 45 kg)',
+};
+
+export const temperaments = ['Calm', 'Friendly', 'Playful', 'Energetic', 'Shy', 'Anxious', 'Good with kids', 'Good with other pets', 'Reactive to dogs'];

@@ -5,7 +5,7 @@ import { Button, Empty, SectionTitle } from '../components/ui';
 import { useStore } from '../store';
 import { colors } from '../theme';
 
-export default function OwnerBookingsScreen({ justBooked }: { justBooked: boolean }) {
+export default function OwnerBookingsScreen({ justBooked, openChat }: { justBooked: boolean; openChat: (ownerId: string, sitterId: string) => void }) {
   const { bookings, sitters, session, setBookingStatus } = useStore();
   const [error, setError] = useState<string | null>(null);
   const mine = bookings.filter((b) => b.ownerId === session?.user.id);
@@ -16,12 +16,15 @@ export default function OwnerBookingsScreen({ justBooked }: { justBooked: boolea
     list.map((b) => {
       const sitter = sitters.find((s) => s.id === b.sitterId);
       return (
-        <BookingCard key={b.id} booking={b} title={sitter?.name ?? 'Sitter'} avatar={sitter?.avatar ?? '🙂'}>
-          {(b.status === 'pending' || b.status === 'accepted') && (
-            <View style={{ flexDirection: 'row', marginTop: 10 }}>
+        <BookingCard key={b.id} booking={b} title={sitter?.name ?? 'Sitter'} photoUrl={sitter?.photoUrl} fallback={sitter?.avatar ?? '🙂'}>
+          <View style={{ flexDirection: 'row', marginTop: 10 }}>
+            {!!sitter?.userId && (
+              <Button title="Message" variant="secondary" onPress={() => openChat(b.ownerId, b.sitterId)} style={{ marginRight: 10 }} />
+            )}
+            {(b.status === 'pending' || b.status === 'accepted') && (
               <Button title="Cancel booking" variant="danger" onPress={() => setBookingStatus(b.id, 'cancelled').then(() => setError(null), (e) => setError(e.message))} />
-            </View>
-          )}
+            )}
+          </View>
         </BookingCard>
       );
     });
