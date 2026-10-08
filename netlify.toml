@@ -1,0 +1,13 @@
+# Netlify builds the website from this repo on every push.
+[build]
+  command = "npx expo export --platform web"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# Single-page app: send every path to index.html.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
