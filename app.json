@@ -20,6 +20,14 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Pet Sitter Finder uses your photos so you can add a profile picture and photos of your pets."
+        }
+      ]
+    ]
   }
 }

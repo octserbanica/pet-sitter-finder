@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle } from 'react-native';
 import { colors } from '../theme';
 
 export function Card({ children, style }: { children: React.ReactNode; style?: ViewStyle }) {
@@ -97,6 +97,24 @@ export function Empty({ emoji, text }: { emoji: string; text: string }) {
       <Text style={{ color: colors.muted, marginTop: 8, textAlign: 'center' }}>{text}</Text>
     </View>
   );
+}
+
+// A round photo, or a fallback emoji / initials on a tinted circle.
+export function Avatar({ url, fallback, size = 48 }: { url?: string | null; fallback: string; size?: number }) {
+  const round = { width: size, height: size, borderRadius: size / 2 };
+  if (url) return <Image source={{ uri: url }} style={[round, { backgroundColor: colors.border }]} accessibilityIgnoresInvertColors />;
+  return (
+    <View style={[round, { backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' }]}>
+      <Text style={{ fontSize: size * 0.45, color: colors.primary, fontWeight: '700' }}>{fallback}</Text>
+    </View>
+  );
+}
+
+export const initials = (name: string) =>
+  name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '🙂';
+
+export function ErrorText({ children }: { children: React.ReactNode }) {
+  return children ? <Text style={{ color: colors.red, marginBottom: 10 }}>{children}</Text> : null;
 }
 
 export const styles = StyleSheet.create({

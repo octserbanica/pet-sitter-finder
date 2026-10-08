@@ -4,11 +4,11 @@ import { Button, Card, Chip, Field, SectionTitle, Stepper } from '../components/
 import { addDays, fmtDate, money, todayPlus, unitCount } from '../format';
 import { quote } from '../pricing';
 import { useStore } from '../store';
-import { colors, petEmoji, serviceLabels } from '../theme';
+import { colors, petEmoji, serviceLabels, serviceUnit } from '../theme';
 import { Service } from '../types';
 
 export default function BookScreen({ id, onDone, onAddPet }: { id: string; onDone: () => void; onAddPet: () => void }) {
-  const { sitters, pets: myPets, createBooking } = useStore();
+  const { sitters, myPets, createBooking } = useStore();
   const sitter = sitters.find((s) => s.id === id)!;
   const eligiblePets = myPets.filter((p) => sitter.accepts.includes(p.type));
   const [selected, setSelected] = useState<string[]>(eligiblePets.slice(0, 1).map((p) => p.id));
@@ -24,10 +24,9 @@ export default function BookScreen({ id, onDone, onAddPet }: { id: string; onDon
   const isNights = service === 'boarding' || service === 'house';
 
   const submit = async () => {
-    const pets = myPets.filter((p) => selected.includes(p.id)).map((p) => ({ name: p.name, type: p.type }));
     setBusy(true); setError(null);
     try {
-      await createBooking({ sitterId: id, pets, service, start, nights: units, note, total });
+      await createBooking({ sitterId: id, petIds: selected, service, start, nights: units, note, total });
       onDone();
     } catch (e: any) {
       setError(e.message);
@@ -86,7 +85,12 @@ export default function BookScreen({ id, onDone, onAddPet }: { id: string; onDon
           <Text style={{ color: colors.text }}>{money(perUnit)} × {unitCount(service, units)}</Text>
           <Text style={{ color: colors.text, fontWeight: '800', fontSize: 18 }}>{money(total)}</Text>
         </View>
-        <Text style={{ color: colors.muted, fontSize: 12, marginTop: 6 }}>You will only be charged once the sitter accepts.</Text>
+        {selected.length > 1 && (
+          <Text style={{ color: colors.muted, fontSize: 12, marginTop: 6 }}>
+            {money(sitter.prices[service] ?? 0)} per {serviceUnit[service]}, plus {sitter.extraPetPercent}% for each extra pet.
+          </Text>
+        )}
+        <Text style={{ color: colors.muted, fontSize: 12, marginTop: 6 }}>Payment is arranged once the sitter accepts.</Text>
       </Card>
 
       {error && <Text style={{ color: colors.red, marginBottom: 10 }}>{error}</Text>}

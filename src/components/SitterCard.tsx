@@ -3,11 +3,12 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, petEmoji, serviceLabels } from '../theme';
 import { Sitter } from '../types';
 import { money } from '../format';
+import { Avatar } from './ui';
 
 export default function SitterCard({ sitter, favorite, onPress }: { sitter: Sitter; favorite: boolean; onPress: () => void }) {
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [s.card, pressed && { opacity: 0.85 }]}>
-      <View style={s.avatar}><Text style={{ fontSize: 30 }}>{sitter.avatar}</Text></View>
+      <View style={{ marginRight: 12 }}><Avatar url={sitter.photoUrl} fallback={sitter.avatar} size={56} /></View>
       <View style={{ flex: 1 }}>
         <View style={s.row}>
           <Text style={s.name} numberOfLines={1}>{sitter.name}</Text>
@@ -33,10 +34,6 @@ const s = StyleSheet.create({
   card: {
     flexDirection: 'row', backgroundColor: colors.card, borderRadius: 16, padding: 14, marginBottom: 12,
     borderWidth: 1, borderColor: colors.border,
-  },
-  avatar: {
-    width: 56, height: 56, borderRadius: 28, backgroundColor: colors.primarySoft,
-    alignItems: 'center', justifyContent: 'center', marginRight: 12,
   },
   row: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
   name: { fontSize: 16, fontWeight: '700', color: colors.text, marginRight: 6 },

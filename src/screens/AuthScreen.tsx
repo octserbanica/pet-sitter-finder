@@ -3,41 +3,55 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text
 import { Button, Field } from '../components/ui';
 import { supabase } from '../supabase';
 import { colors } from '../theme';
-import { Role } from '../types';
 
 type Mode = 'signIn' | 'signUp' | 'reset';
 
 export default function AuthScreen() {
   const [mode, setMode] = useState<Mode>('signIn');
-  const [role, setRole] = useState<Role>('owner');
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [unconfirmed, setUnconfirmed] = useState(false);
 
-  const switchMode = (m: Mode) => { setMode(m); setError(null); setNotice(null); };
+  const switchMode = (m: Mode) => { setMode(m); setError(null); setNotice(null); setUnconfirmed(false); };
+
+  // On the website, the confirmation link brings people back to the page they signed up on.
+  const redirectTo = Platform.OS === 'web' ? window.location.origin : undefined;
+
+  const resend = async () => {
+    setBusy(true); setError(null);
+    const { error } = await supabase.auth.resend({ type: 'signup', email: email.trim(), options: { emailRedirectTo: redirectTo } });
+    setBusy(false);
+    if (error) setError(error.message);
+    else setNotice(`We sent a new confirmation link to ${email.trim()}.`);
+  };
 
   const submit = async () => {
-    setBusy(true); setError(null); setNotice(null);
+    setBusy(true); setError(null); setNotice(null); setUnconfirmed(false);
     try {
       if (mode === 'signIn') {
         const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+        if (error?.code === 'email_not_confirmed' || /not confirmed/i.test(error?.message ?? '')) {
+          setUnconfirmed(true);
+          return;
+        }
         if (error) throw error;
       } else if (mode === 'signUp') {
         const { data, error } = await supabase.auth.signUp({
           email: email.trim(),
           password,
-          options: { data: { full_name: fullName.trim(), role } },
+          options: { data: { full_name: fullName.trim() }, emailRedirectTo: redirectTo },
         });
         if (error) throw error;
         if (!data.session) {
-          setNotice(`We sent a confirmation link to ${email.trim()}. Open it, then sign in here.`);
+          setNotice(`Almost done! We sent a confirmation link to ${email.trim()}. Open it to activate your account, then sign in here.`);
           setMode('signIn');
         }
       } else {
-        const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+        const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo });
         if (error) throw error;
         setNotice(`If ${email.trim()} has an account, a password reset link is on its way.`);
       }
@@ -62,21 +76,6 @@ export default function AuthScreen() {
 
         {mode === 'signUp' && (
           <>
-            <Text style={s.label}>I want to</Text>
-            <View style={s.roles}>
-              {([['owner', '🏠', 'Find a sitter'], ['sitter', '🤝', 'Pet sit']] as const).map(([r, emoji, label]) => (
-                <Pressable
-                  key={r}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: role === r }}
-                  onPress={() => setRole(r)}
-                  style={[s.role, role === r && s.roleSelected]}
-                >
-                  <Text style={{ fontSize: 26 }}>{emoji}</Text>
-                  <Text style={[s.roleText, role === r && { color: colors.primary }]}>{label}</Text>
-                </Pressable>
-              ))}
-            </View>
             <Field label="Your name" value={fullName} onChangeText={setFullName} placeholder="e.g. Octavian Popa" autoComplete="name" />
           </>
         )}
@@ -103,6 +102,15 @@ export default function AuthScreen() {
 
         {error && <Text style={s.error}>{error}</Text>}
         {notice && <Text style={s.notice}>{notice}</Text>}
+        {unconfirmed && (
+          <View style={s.unconfirmed}>
+            <Text style={{ color: colors.amber, fontWeight: '700' }}>Please confirm your email first</Text>
+            <Text style={{ color: colors.text, marginTop: 4, marginBottom: 10 }}>
+              Open the link we sent to {email.trim()} when you signed up. Can't find it? Check your spam folder, or get a new one.
+            </Text>
+            <Button title="Send a new confirmation link" variant="secondary" onPress={resend} disabled={busy} />
+          </View>
+        )}
 
         <Button
           title={busy ? 'Please wait…' : mode === 'signIn' ? 'Sign in' : mode === 'signUp' ? 'Create account' : 'Send reset link'}
@@ -131,13 +139,7 @@ const s = StyleSheet.create({
   title: { fontSize: 28, fontWeight: '800', textAlign: 'center', color: colors.text, marginTop: 6 },
   subtitle: { fontSize: 15, textAlign: 'center', color: colors.muted, marginTop: 6, marginBottom: 28 },
   label: { fontSize: 13, color: colors.muted, marginBottom: 6, fontWeight: '600' },
-  roles: { flexDirection: 'row', gap: 12, marginBottom: 14 },
-  role: {
-    flex: 1, alignItems: 'center', padding: 14, borderRadius: 14, borderWidth: 1.5,
-    borderColor: colors.border, backgroundColor: colors.card,
-  },
-  roleSelected: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
-  roleText: { marginTop: 4, fontWeight: '700', color: colors.text },
+  unconfirmed: { backgroundColor: colors.amberSoft, padding: 12, borderRadius: 10, marginBottom: 12 },
   error: { color: colors.red, backgroundColor: colors.redSoft, padding: 12, borderRadius: 10, marginBottom: 12 },
   notice: { color: colors.green, backgroundColor: colors.greenSoft, padding: 12, borderRadius: 10, marginBottom: 12 },
   links: { alignItems: 'center', marginTop: 18, gap: 12 },

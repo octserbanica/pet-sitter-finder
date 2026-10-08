@@ -1,23 +1,36 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Session } from '@supabase/supabase-js';
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { pickAndUploadPhoto } from './photos';
 import { supabase } from './supabase';
-import { Booking, BookingStatus, Pet, Profile, Service, Sitter } from './types';
+import { Booking, BookingStatus, Message, Mode, Pet, Profile, Service, Sitter } from './types';
 
 // Database rows use snake_case; the app uses camelCase.
 const toSitter = (r: any): Sitter => ({
-  id: r.id, userId: r.user_id, name: r.name, avatar: r.avatar, city: r.city, neighborhood: r.neighborhood,
-  rating: Number(r.rating), reviews: r.reviews, price: r.price, years: r.years, verified: r.verified,
+  id: r.id, userId: r.user_id, name: r.name, avatar: r.avatar, photoUrl: r.photo_url, city: r.city,
+  neighborhood: r.neighborhood, rating: Number(r.rating), reviews: r.reviews, prices: r.prices ?? {},
+  extraPetPercent: r.extra_pet_percent ?? 30, price: r.price, years: r.years, verified: r.verified,
   available: r.available, services: r.services, accepts: r.accepts, bio: r.bio, reviewList: r.review_list ?? [],
 });
-const toPet = (r: any): Pet => ({ id: r.id, name: r.name, type: r.type, breed: r.breed, age: r.age, notes: r.notes });
+const toPet = (r: any): Pet => ({
+  id: r.id, ownerId: r.owner_id, name: r.name, type: r.type, breed: r.breed, age: r.age, size: r.size,
+  temperament: r.temperament ?? [], notes: r.notes, photoUrl: r.photo_url,
+});
 const toBooking = (r: any): Booking => ({
-  id: r.id, ownerId: r.owner_id, sitterId: r.sitter_id, ownerName: r.owner_name, pets: r.pets, service: r.service,
-  start: String(r.start).slice(0, 10), nights: r.nights, note: r.note, total: r.total, status: r.status, createdAt: Date.parse(r.created_at),
+  id: r.id, ownerId: r.owner_id, sitterId: r.sitter_id, ownerName: r.owner_name, pets: r.pets, petIds: r.pet_ids ?? [],
+  service: r.service, start: String(r.start).slice(0, 10), nights: r.nights, note: r.note, total: r.total,
+  status: r.status, createdAt: Date.parse(r.created_at),
+});
+const toProfile = (r: any): Profile => ({
+  id: r.id, fullName: r.full_name, age: r.age, about: r.about ?? '', avatarUrl: r.avatar_url,
+});
+const toMessage = (r: any): Message => ({
+  id: r.id, ownerId: r.owner_id, sitterId: r.sitter_id, senderId: r.sender_id, body: r.body, createdAt: Date.parse(r.created_at),
 });
 
 export interface NewBooking {
   sitterId: string;
-  pets: { name: string; type: Pet['type'] }[];
+  petIds: string[];
   service: Service;
   start: string;
   nights: number;
@@ -25,27 +38,42 @@ export interface NewBooking {
   total: number; // shown to the user; the database recalculates it
 }
 
+export type PetInput = Omit<Pet, 'id' | 'ownerId'>;
+export type SitterInput = Pick<Sitter, 'city' | 'neighborhood' | 'available' | 'prices' | 'extraPetPercent' | 'accepts' | 'bio' | 'years'>;
+
 interface Store {
   session: Session | null;
+  email: string;
   profile: Profile | null;
+  mode: Mode;
+  setMode: (m: Mode) => void;
   loading: boolean;
   loadError: string | null;
   sitters: Sitter[];
-  pets: Pet[];
+  myPets: Pet[];
+  bookedPets: Pet[]; // other owners' pets in bookings sent to me as a sitter
   bookings: Booking[];
   favorites: string[];
+  messages: Message[];
+  people: Record<string, Profile>; // public profiles of people I have bookings or chats with
   mySitter: Sitter | undefined;
   refresh: () => Promise<void>;
-  addPet: (pet: Omit<Pet, 'id'>) => Promise<void>;
+  loadPeople: (ids: string[]) => Promise<void>;
+  updateProfile: (p: Partial<Omit<Profile, 'id'>>) => Promise<void>;
+  uploadPhoto: (name: string) => Promise<string | null>;
+  savePet: (pet: PetInput, id?: string) => Promise<void>;
   removePet: (id: string) => Promise<void>;
   createBooking: (b: NewBooking) => Promise<void>;
   setBookingStatus: (id: string, status: BookingStatus) => Promise<void>;
-  updateMySitter: (s: Sitter) => Promise<void>;
+  becomeSitter: () => Promise<void>;
+  updateMySitter: (s: SitterInput) => Promise<void>;
   toggleFavorite: (sitterId: string) => Promise<void>;
+  sendMessage: (ownerId: string, sitterId: string, body: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
 const StoreContext = createContext<Store | null>(null);
+const MODE_KEY = 'pet-sitter-finder/mode';
 
 const check = <T,>({ data, error }: { data: T; error: { message: string } | null }) => {
   if (error) throw new Error(error.message);
@@ -56,12 +84,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [mode, setModeState] = useState<Mode>('owner');
   const [dataLoading, setDataLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sitters, setSitters] = useState<Sitter[]>([]);
   const [pets, setPets] = useState<Pet[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [people, setPeople] = useState<Record<string, Profile>>({});
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -69,10 +100,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setAuthReady(true);
     });
     const { data } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
+    AsyncStorage.getItem(MODE_KEY).then((m) => m && setModeState(m as Mode)).catch(() => {});
     return () => data.subscription.unsubscribe();
   }, []);
 
   const userId = session?.user.id;
+
+  const loadPeople = useCallback(async (ids: string[]) => {
+    const unique = [...new Set(ids)].filter(Boolean);
+    if (!unique.length) return;
+    const rows = check(await supabase.from('profiles').select('*').in('id', unique));
+    setPeople((p) => ({ ...p, ...Object.fromEntries(rows.map((r: any) => [r.id, toProfile(r)])) }));
+  }, []);
+
+  const loadMessages = useCallback(async () => {
+    const rows = check(await supabase.from('messages').select('*').order('created_at')).map(toMessage);
+    setMessages(rows);
+    return rows;
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!userId) return;
@@ -83,17 +128,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       supabase.from('bookings').select('*').order('created_at', { ascending: false }),
       supabase.from('favorites').select('sitter_id'),
     ]);
-    const pr: any = check(p);
-    setProfile({ id: pr.id, email: session?.user.email ?? '', fullName: pr.full_name, role: pr.role });
-    setSitters(check(s).map(toSitter));
+    setProfile(toProfile(check(p)));
+    const sitterRows = check(s).map(toSitter);
+    const bookingRows = check(b).map(toBooking);
+    setSitters(sitterRows);
     setPets(check(pe).map(toPet));
-    setBookings(check(b).map(toBooking));
+    setBookings(bookingRows);
     setFavorites(check(f).map((r: any) => r.sitter_id));
-  }, [userId]);
+    const msgs = await loadMessages();
+    const sitterOwners = Object.fromEntries(sitterRows.map((x) => [x.id, x.userId]));
+    await loadPeople([
+      ...bookingRows.map((x) => x.ownerId),
+      ...msgs.flatMap((m) => [m.ownerId, sitterOwners[m.sitterId] ?? '']),
+    ]);
+  }, [userId, loadMessages, loadPeople]);
 
   useEffect(() => {
     if (!userId) {
-      setProfile(null); setSitters([]); setPets([]); setBookings([]); setFavorites([]);
+      setProfile(null); setSitters([]); setPets([]); setBookings([]); setFavorites([]); setMessages([]); setPeople({});
       return;
     }
     setDataLoading(true);
@@ -101,20 +153,76 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     refresh().catch((e) => setLoadError(e.message)).finally(() => setDataLoading(false));
   }, [userId, refresh]);
 
+  // Check for new chat messages every few seconds while signed in.
+  useEffect(() => {
+    if (!userId) return;
+    const timer = setInterval(() => {
+      loadMessages()
+        .then((msgs) => {
+          const unknown = msgs.map((m) => m.ownerId).filter((id) => !people[id]);
+          if (unknown.length) loadPeople(unknown).catch(() => {});
+        })
+        .catch(() => {});
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [userId, loadMessages, loadPeople, people]);
+
+  const mySitter = sitters.find((s) => s.userId === userId);
+
   const store: Store = {
     session,
+    email: session?.user.email ?? '',
     profile,
+    mode,
+    setMode: (m) => {
+      setModeState(m);
+      AsyncStorage.setItem(MODE_KEY, m).catch(() => {});
+    },
     loading: !authReady || dataLoading || (!!userId && !profile && !loadError),
     loadError,
     sitters,
-    pets,
+    myPets: pets.filter((p) => p.ownerId === userId),
+    bookedPets: pets.filter((p) => p.ownerId !== userId),
     bookings,
     favorites,
-    mySitter: sitters.find((s) => s.userId === userId),
+    messages,
+    people,
+    mySitter,
     refresh,
-    addPet: async (pet) => {
-      const row = check(await supabase.from('pets').insert(pet).select().single());
-      setPets((list) => [...list, toPet(row)]);
+    loadPeople,
+    updateProfile: async (patch) => {
+      const row = check(
+        await supabase
+          .from('profiles')
+          .update({
+            ...(patch.fullName !== undefined && { full_name: patch.fullName }),
+            ...(patch.age !== undefined && { age: patch.age }),
+            ...(patch.about !== undefined && { about: patch.about }),
+            ...(patch.avatarUrl !== undefined && { avatar_url: patch.avatarUrl }),
+          })
+          .eq('id', userId!)
+          .select()
+          .single(),
+      );
+      setProfile(toProfile(row));
+      // The database copies name and photo onto the sitter listing.
+      if (mySitter) {
+        const s = check(await supabase.from('sitters').select('*').eq('id', mySitter.id).single());
+        setSitters((list) => list.map((x) => (x.id === mySitter.id ? toSitter(s) : x)));
+      }
+    },
+    uploadPhoto: (name) => pickAndUploadPhoto(userId!, name),
+    savePet: async (pet, id) => {
+      const values = {
+        name: pet.name, type: pet.type, breed: pet.breed, age: pet.age, size: pet.size,
+        temperament: pet.temperament, notes: pet.notes, photo_url: pet.photoUrl,
+      };
+      const row = toPet(check(
+        id
+          ? await supabase.from('pets').update(values).eq('id', id).select().single()
+          : await supabase.from('pets').insert(values).select().single(),
+      ));
+      setPets((list) => (id ? list.map((p) => (p.id === id ? row : p)) : [...list, row]));
     },
     removePet: async (id) => {
       check(await supabase.from('pets').delete().eq('id', id));
@@ -124,7 +232,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const row = check(
         await supabase
           .from('bookings')
-          .insert({ sitter_id: b.sitterId, pets: b.pets, service: b.service, start: b.start, nights: b.nights, note: b.note, total: b.total })
+          .insert({ sitter_id: b.sitterId, pet_ids: b.petIds, service: b.service, start: b.start, nights: b.nights, note: b.note, total: b.total })
           .select()
           .single(),
       );
@@ -134,19 +242,30 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const row = check(await supabase.from('bookings').update({ status }).eq('id', id).select().single());
       setBookings((list) => list.map((x) => (x.id === id ? toBooking(row) : x)));
     },
+    becomeSitter: async () => {
+      // The database fills in the name and photo from the profile.
+      const row = check(
+        await supabase
+          .from('sitters')
+          .insert({ user_id: userId, name: profile?.fullName || 'New sitter', prices: { dropin: 50 }, accepts: ['dog', 'cat'], available: false })
+          .select()
+          .single(),
+      );
+      setSitters((list) => [...list, toSitter(row)]);
+    },
     updateMySitter: async (s) => {
       const row = check(
         await supabase
           .from('sitters')
           .update({
-            name: s.name, city: s.city, neighborhood: s.neighborhood, price: s.price, available: s.available,
-            services: s.services, accepts: s.accepts, bio: s.bio, avatar: s.avatar,
+            city: s.city, neighborhood: s.neighborhood, available: s.available, prices: s.prices,
+            extra_pet_percent: s.extraPetPercent, accepts: s.accepts, bio: s.bio, years: s.years,
           })
-          .eq('id', s.id)
+          .eq('id', mySitter!.id)
           .select()
           .single(),
       );
-      setSitters((list) => list.map((x) => (x.id === s.id ? toSitter(row) : x)));
+      setSitters((list) => list.map((x) => (x.id === mySitter!.id ? toSitter(row) : x)));
     },
     toggleFavorite: async (sitterId) => {
       if (favorites.includes(sitterId)) {
@@ -156,6 +275,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         check(await supabase.from('favorites').insert({ sitter_id: sitterId }));
         setFavorites((f) => [...f, sitterId]);
       }
+    },
+    sendMessage: async (ownerId, sitterId, body) => {
+      const row = check(
+        await supabase.from('messages').insert({ owner_id: ownerId, sitter_id: sitterId, body: body.trim() }).select().single(),
+      );
+      setMessages((list) => [...list, toMessage(row)]);
     },
     signOut: async () => {
       await supabase.auth.signOut();

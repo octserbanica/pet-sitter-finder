@@ -7,7 +7,7 @@ import { colors, petLabels, serviceLabels } from '../theme';
 import { PetType, Service } from '../types';
 
 export default function FindScreen({ openSitter }: { openSitter: (id: string) => void }) {
-  const { sitters, favorites } = useStore();
+  const { sitters, favorites, session } = useStore();
   const [query, setQuery] = useState('');
   const [pet, setPet] = useState<PetType | null>(null);
   const [service, setService] = useState<Service | null>(null);
@@ -17,6 +17,7 @@ export default function FindScreen({ openSitter }: { openSitter: (id: string) =>
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
     return sitters
+      .filter((s) => s.userId !== session?.user.id)
       .filter((s) => !q || `${s.name} ${s.city} ${s.neighborhood}`.toLowerCase().includes(q))
       .filter((s) => !pet || s.accepts.includes(pet))
       .filter((s) => !service || s.services.includes(service))
